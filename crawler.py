@@ -1,15 +1,15 @@
-import asyncio
-import aiohttp
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
-import logging
 import re
 import json
+import asyncio
+import aiohttp
+import logging
 import aiofiles
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
 from collections import defaultdict
 
-
 class Crawler:
+
     def  __init__(self):
         self.timeout = 10
         self.max_retries = 5
@@ -17,7 +17,6 @@ class Crawler:
         self.visited_urls = set()
         self.product_urls = defaultdict(set)
         self.total_urls_crawled = 0
-        self.total_urls_crawled_per_domain = {}
         self.session = None
         self.setup_logging()
 
@@ -55,8 +54,9 @@ class Crawler:
         """configure it accordingly to the website based on the pdp"""
         patterns = [
             r'/product',   #hyugalife, themomosco, plix, dermaco
-            r'products',    #plum, mcaffeine, dermatouch, mamaearth, discoverpilgrim
+            r'/products',    #plum, mcaffeine, dermatouch, mamaearth, discoverpilgrim
             r'/collections',    #beminamlist
+            r'/items'
         ]
         return any(re.search(pattern, url.lower()) for pattern in patterns)
 
@@ -82,33 +82,36 @@ class Crawler:
         checks for the links if already crawled
         maintain stats
         """
+
+        # if we have seen that url already
         if url in self.visited_urls:
             return
         
-        if domain in self.total_urls_crawled_per_domain.keys():
-            self.total_urls_crawled_per_domain[domain] += 1
-        else:
-            self.total_urls_crawled_per_domain[domain] = 1
-        
+        # add url to visited urls set
         self.visited_urls.add(url)
         self.total_urls_crawled += 1
-        self.total_urls_crawled_per_domain[domain] += 1
 
+        # logging: how many urls crawled
         if self.total_urls_crawled % 100 == 0:
             self.logger.info(f"Crawled {self.total_urls_crawled} URLs")
-            self.logger.info(f"Stats of each domain: {self.total_urls_crawled_per_domain}")
 
+        # returns html data from a url
         html = await self.fetch_html(url)
         if not html:
             return
         
+        # returns whether a url mathches or not the pdp path
         if self.is_product_url(url):
             self.product_urls[domain].add(url)
 
+        # set of urls, from html data
         urls = self.extract_urls(html, url)
+        # to keep track of same domain urls
         same_domain_urls = {url for url in urls if self.get_domain(url) == domain}
 
+        # create one coroutine per url, run coroutines once count is 10
         tasks = []
+        # crawling url if not visited
         for new_url in same_domain_urls - self.visited_urls:
             if len(tasks) > 10:
                 await asyncio.gather(*tasks)
@@ -127,7 +130,6 @@ class Crawler:
         async with aiofiles.open('results.json', 'w') as f:
             await f.write(json.dumps(results, indent=2))
 
-
 async def main(domains):
     """
     entry point to start crawling for domain asynchronously
@@ -143,7 +145,7 @@ async def main(domains):
     await asyncio.gather(*tasks)
     await crawler.session.close()
     await crawler.save_results()
-
+    
 # list of domains
 domains = [
     'hyugalife.com',
@@ -156,4 +158,5 @@ domains = [
     'plixlife.com',
     'discoverpilgrim.com'
 ]
+
 asyncio.run(main(domains))
